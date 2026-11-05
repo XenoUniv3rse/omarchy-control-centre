@@ -12,10 +12,22 @@ It is built from Omarchy's own panel components (`KeyboardPanel`, `PanelSlider`,
 - **Wi-Fi and Bluetooth tiles.** The round icon switches the radio on or off; the
   rest of the tile opens the full Omarchy Wi-Fi or Bluetooth panel.
 - **Quick toggles.** Night light, Do not disturb and Stay awake.
+- **Status tiles** that replace the bar's indicators next to the clock:
+  - **Record screen:** starts a recording through Omarchy's capture menu, and
+    stops one in progress.
+  - **Passwordless sudo:** sets it up, and revokes it while granted.
+  - **Reminders:** sets one, or lists the ones pending.
+  - **Remote session:** a banner while someone is connected to your desktop.
+- **Warning icon.** The bar icon turns the theme's urgent colour while a screen
+  recording, passwordless sudo or a remote session is active, so you still see
+  it with the panel closed.
 - **Sound and microphone sliders**, with mute on the icon.
 - **Output device picker.** With Pipeworks, choose which device the Main output
   plays through. Handy when you switch between laptop speakers and a headset.
 - **Brightness slider**, plus a shortcut to the hyprmoncfg display panel.
+
+To drop the indicators widget from the bar once this is installed, remove the
+`omarchy.indicators` entry from `bar.layout` in `~/.config/omarchy/shell.json`.
 
 ### Opening
 

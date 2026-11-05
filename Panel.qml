@@ -29,6 +29,45 @@ Panel {
   property bool nightLight: false
   property bool dnd: false
   property bool stayAwake: false
+  // Formerly the bar's indicators next to the clock.
+  property bool recording: false
+  property bool sudoGranted: false
+  property bool remoteSession: false
+  property int reminderCount: 0
+  // Anything that should still catch the eye with the panel closed turns the
+  // bar icon the theme's urgent colour.
+  readonly property bool alert: recording || sudoGranted || remoteSession
+
+  readonly property string alertScript: [
+    "omarchy-capture-screenrecording --status >/dev/null 2>&1 && echo rec=1 || echo rec=0",
+    "omarchy-sudo-passwordless --active >/dev/null 2>&1 && echo sudo=1 || echo sudo=0",
+    "pgrep -x -u \"$(id -u)\" gliff-server >/dev/null 2>&1 && echo remote=1 || echo remote=0",
+    "echo \"rem=$(omarchy-reminder show --json 2>/dev/null | tr -d '\\n')\""
+  ].join("; ")
+  function applyAlerts(text) {
+    var lines = String(text || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var eq = lines[i].indexOf("=")
+      if (eq < 0) continue
+      var key = lines[i].slice(0, eq), value = lines[i].slice(eq + 1).trim()
+      if (key === "rec") root.recording = value === "1"
+      else if (key === "sudo") root.sudoGranted = value === "1"
+      else if (key === "remote") root.remoteSession = value === "1"
+      else if (key === "rem") {
+        var n = 0
+        try { n = Number(JSON.parse(value).count) || 0 } catch (e) {}
+        root.reminderCount = Math.max(0, Math.min(999, n))
+      }
+    }
+  }
+  Process {
+    id: alertProbe
+    command: ["bash", "-c", root.alertScript]
+    stdout: StdioCollector { onStreamFinished: root.applyAlerts(text) }
+  }
+  function refreshAlerts() { if (!alertProbe.running) alertProbe.running = true }
+  Timer { interval: root.opened ? 2000 : 5000; repeat: true; running: true; triggeredOnStart: true; onTriggered: root.refreshAlerts() }
+  function runAndClose(argv) { root.close(); root.run(argv) }
   // While the user drags a slider, polling must not snap it back.
   property double volumeHold: 0
   property double micHold: 0
@@ -226,7 +265,7 @@ Panel {
   }
   function refresh() { if (!probe.running) probe.running = true }
   function refreshSoon() { settleTimer.restart() }
-  Timer { id: settleTimer; interval: 700; onTriggered: root.refresh() }
+  Timer { id: settleTimer; interval: 700; onTriggered: { root.refresh(); root.refreshAlerts() } }
   Timer { interval: 2000; repeat: true; running: root.opened; triggeredOnStart: true; onTriggered: root.refresh() }
 
   function run(argv) { Quickshell.execDetached(argv) }
@@ -261,6 +300,7 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: "󰙪"
+    active: root.alert
     onPressed: function(b) {
       if (b !== Qt.LeftButton) return
       if (root.opened && root.pinned) { root.close(); return }
@@ -345,6 +385,56 @@ Panel {
             width: (parent.width - parent.spacing * 2) / 3
             on: root.stayAwake; icon: "󰅶"; label: "Stay awake"
             onToggle: { root.stayAwake = !root.stayAwake; root.run(["omarchy-toggle-idle"]); root.refreshSoon() }
+          }
+        }
+
+        Row {
+          width: parent.width
+          spacing: Style.space(10)
+
+          Chip {
+            width: (parent.width - parent.spacing * 2) / 3
+            on: root.recording; urgent: true
+            icon: "󰻂"
+            label: root.recording ? "Stop recording" : "Record screen"
+            onToggle: {
+              if (root.recording) { root.recording = false; root.run(["omarchy-capture-screenrecording", "--stop-recording"]); root.refreshSoon() }
+              else root.runAndClose(["omarchy-menu", "toggle", "trigger.capture.screenrecord"])
+            }
+          }
+          Chip {
+            width: (parent.width - parent.spacing * 2) / 3
+            on: root.sudoGranted; urgent: true
+            icon: "󰟵"
+            label: root.sudoGranted ? "Revoke sudo" : "Passwordless sudo"
+            onToggle: {
+              if (root.sudoGranted) { root.sudoGranted = false; root.run(["omarchy-sudo-passwordless", "--disable"]); root.refreshSoon() }
+              else root.runAndClose(["omarchy-launch-floating-terminal-with-presentation", "omarchy-sudo-passwordless"])
+            }
+          }
+          Chip {
+            width: (parent.width - parent.spacing * 2) / 3
+            on: root.reminderCount > 0
+            icon: root.reminderCount > 0 ? "󰾇" : "󰂜"
+            label: root.reminderCount === 1 ? "1 reminder" : (root.reminderCount > 1 ? root.reminderCount + " reminders" : "Reminder")
+            onToggle: root.runAndClose(root.reminderCount > 0 ? ["omarchy-reminder", "show"] : ["omarchy-reminder", "-i"])
+          }
+        }
+
+        // Only while one is running: who is connected.
+        Rectangle {
+          visible: root.remoteSession
+          width: parent.width
+          height: Style.space(34)
+          radius: Style.cornerRadius
+          color: Qt.rgba(Commons.Color.urgent.r, Commons.Color.urgent.g, Commons.Color.urgent.b, 0.22)
+          PlainText {
+            anchors.left: parent.left; anchors.leftMargin: Style.space(10)
+            anchors.right: parent.right; anchors.rightMargin: Style.space(10)
+            anchors.verticalCenter: parent.verticalCenter
+            text: "󰢹   Remote session active"
+            color: Commons.Color.urgent
+            font.pixelSize: Style.font.body
           }
         }
 
@@ -563,12 +653,15 @@ Panel {
   component Chip: Rectangle {
     id: chip
     property bool on: false
+    // Warnings (recording, passwordless sudo) light up in the urgent colour.
+    property bool urgent: false
+    readonly property color tone: urgent ? Commons.Color.urgent : Commons.Color.accent
     property string icon: ""
     property string label: ""
     signal toggle()
     height: Style.space(58)
     radius: Style.cornerRadius
-    color: chip.on ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, chipArea.containsMouse ? 0.32 : 0.24)
+    color: chip.on ? Qt.rgba(chip.tone.r, chip.tone.g, chip.tone.b, chipArea.containsMouse ? 0.32 : 0.24)
                    : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, chipArea.containsMouse ? 0.12 : 0.07)
     Behavior on color { ColorAnimation { duration: Style.duration(140) } }
     MouseArea { id: chipArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: chip.toggle() }
@@ -579,7 +672,7 @@ Panel {
       PlainText {
         anchors.horizontalCenter: parent.horizontalCenter
         text: chip.icon; font.pixelSize: Style.font.icon
-        color: chip.on ? Commons.Color.accent : root.fg
+        color: chip.on ? chip.tone : root.fg
       }
       PlainText {
         width: parent.width
