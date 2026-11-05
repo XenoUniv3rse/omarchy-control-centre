@@ -24,6 +24,8 @@ It is built from Omarchy's own panel components (`KeyboardPanel`, `PanelSlider`,
 - **Sound and microphone sliders**, with mute on the icon.
 - **Output device picker.** With Pipeworks, choose which device the Main output
   plays through. Handy when you switch between laptop speakers and a headset.
+- **Microphone picker.** With Pipeworks, tick which microphones feed the Mic
+  strip. Unplugged mics you have set up stay listed as *Not connected*.
 - **Brightness slider**, plus a shortcut to the hyprmoncfg display panel.
 
 To drop the indicators widget from the bar once this is installed, remove the
@@ -31,9 +33,7 @@ To drop the indicators widget from the bar once this is installed, remove the
 
 ### Opening
 
-- **Hover** the icon to open it. It stays open while the pointer is over the
-  icon or the panel, and closes shortly after it leaves.
-- **Click** the icon to pin it open. Click again, or anywhere else, to close it.
+- **Click** the icon to open it. Click it again, or anywhere else, to close it.
 - The panel does not take keyboard focus from the window you are typing in.
 
 ## Pipeworks
@@ -47,6 +47,10 @@ PipeWire's default devices:
 - **Mute** uses Pipeworks' own mute.
 - **Device picker** moves the output with Pipeworks' `retarget-output`, so
   routing and effects stay intact.
+- **Microphone picker** adds and removes the input's sources with
+  `add-input-source` / `remove-input-source`, the same as Pipeworks' strip
+  settings. A Pipeworks input mixes every source it lists, so this is a set
+  of ticks rather than a single choice, and the last mic can't be removed.
 
 Everything goes over D-Bus, exactly as Pipeworks' own panel does; this plugin
 never edits Pipeworks' files.

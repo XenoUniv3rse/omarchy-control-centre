@@ -6,7 +6,7 @@ import qs.Ui
 import qs.Commons
 import qs.Commons as Commons
 
-// Control: one bar icon that opens (on hover, or pinned by a click) a control
+// Control: one bar icon that opens, on click, a control
 // centre built from Omarchy's own panel parts, so it follows the theme:
 // Wi-Fi and Bluetooth tiles, quick toggles, and sound / microphone /
 // brightness sliders, with shortcuts into the full panels of widgets that are
@@ -188,7 +188,8 @@ Panel {
   }
   property bool devicesOpen: false
   onOpenedChanged: {
-    if (!opened) { pinned = false; devicesOpen = false }
+    if (!opened) { devicesOpen = false; micDevicesOpen = false }
+    else refresh()
     if (pwRunning) pwActivate("set-state-watch", "[<" + (opened ? "true" : "false") + ">]", "watch")
   }
   Timer {
@@ -206,6 +207,61 @@ Panel {
     if (!root.pwOut || sink === root.pwOutputSink) { root.devicesOpen = false; return }
     root.pwActivate("retarget-output", "[<(" + root.pwQuoted(root.pwOutput.id) + ", " + root.pwQuoted(sink) + ")>]")
     root.devicesOpen = false
+  }
+
+  // Microphones feeding the Mic strip. A Pipeworks input mixes every source it
+  // lists, so this is a set (add / remove), not a single device to swap.
+  property bool micDevicesOpen: false
+  readonly property var pwInputDevices: {
+    var list = root.pwState.devices && root.pwState.devices.inputs instanceof Array ? root.pwState.devices.inputs : []
+    return list.filter(function(d) { return d && typeof d.name === "string" && d.name !== "" }).slice(0, 24)
+  }
+  readonly property var pwInputSources: {
+    var list = root.pwInput && root.pwInput.sources instanceof Array ? root.pwInput.sources : []
+    return list.filter(function(src) { return src && typeof src.name === "string" && src.name !== "" })
+  }
+  function isMicSource(name) {
+    for (var i = 0; i < root.pwInputSources.length; i++) if (root.pwInputSources[i].name === name) return true
+    return false
+  }
+  function isMicConnected(name) {
+    for (var i = 0; i < root.pwInputDevices.length; i++) if (root.pwInputDevices[i].name === name) return true
+    return false
+  }
+  // A readable name for a node that is not plugged in (no description then):
+  // alsa_input.usb-Corsair_CORSAIR_VIRTUOSO_SE_USB_Gaming_Headset_162bd...-00.mono-fallback
+  function prettyNode(name) {
+    var n = String(name).replace(/^(alsa|bluez)_(input|output)\./, "").replace(/\.[a-z-]+$/, "")
+    n = n.replace(/^(usb|pci|bluez)-/, "").replace(/_[0-9a-f]{8,}(-\d+)?$/i, "").replace(/-\d+$/, "")
+    return n.replace(/_/g, " ").slice(0, 60)
+  }
+  function micLabel(name) {
+    for (var i = 0; i < root.pwInputDevices.length; i++)
+      if (root.pwInputDevices[i].name === name) return String(root.pwInputDevices[i].description || name)
+    return root.prettyNode(name)
+  }
+  // Everything worth listing: connected mics, plus configured ones that are unplugged.
+  readonly property var micChoices: {
+    var out = [], seen = ({})
+    for (var i = 0; i < root.pwInputDevices.length; i++) { var d = root.pwInputDevices[i]; seen[d.name] = true; out.push(d.name) }
+    for (var j = 0; j < root.pwInputSources.length; j++) { var n = root.pwInputSources[j].name; if (!seen[n]) { seen[n] = true; out.push(n) } }
+    return out
+  }
+  readonly property string micSummary: {
+    var live = root.pwInputSources.filter(function(src) { return root.isMicConnected(src.name) })
+    if (root.pwInputSources.length === 0) return "No microphone"
+    if (live.length === 0) return "No microphone connected"
+    var first = root.micLabel(live[0].name)
+    return live.length > 1 ? first + " + " + (live.length - 1) + " more" : first
+  }
+  function toggleMicSource(name) {
+    if (!root.pwIn) return
+    if (root.isMicSource(name)) {
+      if (root.pwInputSources.length <= 1) return   // never leave Mic with nothing feeding it
+      root.pwActivate("remove-input-source", "[<(" + root.pwQuoted(root.pwInput.id) + ", " + root.pwQuoted(name) + ")>]")
+    } else {
+      root.pwActivate("add-input-source", "[<(" + root.pwQuoted(root.pwInput.id) + ", " + root.pwQuoted(name) + ")>]")
+    }
   }
 
   function unlockVolume() { root.pwActivate("set-volume-lock", "[<false>]") }
@@ -266,7 +322,9 @@ Panel {
   function refresh() { if (!probe.running) probe.running = true }
   function refreshSoon() { settleTimer.restart() }
   Timer { id: settleTimer; interval: 700; onTriggered: { root.refresh(); root.refreshAlerts() } }
-  Timer { interval: 2000; repeat: true; running: root.opened; triggeredOnStart: true; onTriggered: root.refresh() }
+  // Every 2s while open; every 30s otherwise, so the panel opens on current
+  // values instead of flashing its defaults before the first reading lands.
+  Timer { interval: root.opened ? 2000 : 30000; repeat: true; running: true; triggeredOnStart: true; onTriggered: root.refresh() }
 
   function run(argv) { Quickshell.execDetached(argv) }
   // Full panels of the widgets this one stands in for.
@@ -275,25 +333,8 @@ Panel {
     run(["omarchy-shell", "-q", "shell", "summon", id, "{}"])
   }
 
-  // ----------------------------------------------- hover open / close
-  // Hover opens it; leaving both the icon and the card closes it. A click on
-  // the icon pins it open until the next click (or a click elsewhere).
-  property bool pinned: false
-  property bool iconHovered: false
-  property bool cardHovered: false
-  onIconHoveredChanged: hoverChanged()
-  onCardHoveredChanged: hoverChanged()
-  function hoverChanged() {
-    if (iconHovered && !opened) openTimer.restart()
-    if (iconHovered || cardHovered) closeTimer.stop()
-    else { openTimer.stop(); if (opened && !pinned) closeTimer.restart() }
-  }
-  Timer { id: openTimer; interval: 140; onTriggered: if (root.iconHovered && !root.opened) root.open() }
-  Timer { id: closeTimer; interval: 380; onTriggered: if (!root.iconHovered && !root.cardHovered && !root.pinned) root.close() }
-
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
-  HoverHandler { onHoveredChanged: root.iconHovered = hovered }
 
   BarIconButton {
     id: button
@@ -301,23 +342,9 @@ Panel {
     bar: root.bar
     text: "󰙪"
     active: root.alert
-    onPressed: function(b) {
-      if (b !== Qt.LeftButton) return
-      if (root.opened && root.pinned) { root.close(); return }
-      root.pinned = true
-      if (!root.opened) root.open()
-    }
+    // Click to open, click again (or anywhere else) to close.
+    onPressed: function(b) { if (b === Qt.LeftButton) root.toggle() }
   }
-
-  // Only the card takes the pointer while hover-opened, so the bar underneath
-  // keeps reporting hover on the icon; pinned, the whole screen does, so a
-  // click anywhere else dismisses it like any other panel.
-  Region {
-    id: cardRegion
-    x: panel.cardOrigin.x; y: panel.cardOrigin.y
-    width: panel.contentWidth; height: panel.drawnHeight
-  }
-  Region { id: fullRegion; width: panel.screenW; height: panel.screenH }
 
   KeyboardPanel {
     id: panel
@@ -325,8 +352,7 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    mask: root.pinned ? fullRegion : cardRegion
-    // A hover panel must not take keyboard focus from the window you are in.
+    // Mouse-driven: leave keyboard focus with the window you are in.
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     contentWidth: panel.fittedContentWidth(Style.space(360))
     contentHeight: panel.fittedContentHeight(panel.loadedContentHeight, Style.space(620))
@@ -334,7 +360,6 @@ Panel {
     content: Item {
       id: body
       implicitHeight: column.implicitHeight
-      HoverHandler { onHoveredChanged: root.cardHovered = hovered }
 
       Column {
         id: column
@@ -566,6 +591,96 @@ Panel {
             onReleased: function(v) { root.micHold = Date.now() + 1500; root.mic = v; micApply.restart() }
           }
         }
+        // ---------- microphones feeding Mic (Pipeworks) ----------
+        Column {
+          width: parent.width
+          visible: root.pwIn
+          spacing: Style.space(4)
+
+          Rectangle {
+            width: parent.width
+            height: Style.space(36)
+            radius: Style.cornerRadius
+            color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, micDeviceArea.containsMouse || root.micDevicesOpen ? 0.12 : 0.07)
+            Behavior on color { ColorAnimation { duration: Style.duration(140) } }
+            MouseArea { id: micDeviceArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.micDevicesOpen = !root.micDevicesOpen }
+            PlainText {
+              id: micDeviceGlyph
+              anchors.left: parent.left; anchors.leftMargin: Style.space(10)
+              anchors.verticalCenter: parent.verticalCenter
+              text: "󰍬"
+              font.pixelSize: Style.font.icon
+            }
+            PlainText {
+              anchors.left: micDeviceGlyph.right; anchors.leftMargin: Style.space(10)
+              anchors.right: micDeviceChevron.left; anchors.rightMargin: Style.space(6)
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.micSummary
+              font.pixelSize: Style.font.body
+            }
+            PlainText {
+              id: micDeviceChevron
+              anchors.right: parent.right; anchors.rightMargin: Style.space(10)
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.micDevicesOpen ? "󰅃" : "󰅀"
+              color: root.dim; font.pixelSize: Style.font.caption
+            }
+          }
+
+          Repeater {
+            model: root.micDevicesOpen ? root.micChoices : []
+            Rectangle {
+              required property var modelData
+              readonly property bool used: root.isMicSource(modelData)
+              readonly property bool connected: root.isMicConnected(modelData)
+              readonly property bool locked: used && root.pwInputSources.length <= 1
+              width: parent ? parent.width : 0
+              height: Style.space(connected ? 34 : 44)
+              radius: Style.cornerRadius
+              color: used ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.22)
+                          : (micPickArea.containsMouse ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.10) : "transparent")
+              MouseArea {
+                id: micPickArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: locked ? Qt.ArrowCursor : Qt.PointingHandCursor
+                onClicked: root.toggleMicSource(modelData)
+              }
+              PlainText {
+                id: micPickGlyph
+                anchors.left: parent.left; anchors.leftMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.deviceIcon(modelData, root.micLabel(modelData)) === "󰋋" ? "󰋋" : "󰍬"
+                color: used ? Commons.Color.accent : (connected ? root.fg : root.dim)
+                font.pixelSize: Style.font.icon
+              }
+              Column {
+                anchors.left: micPickGlyph.right; anchors.leftMargin: Style.space(10)
+                anchors.right: micPickCheck.left; anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+                PlainText { width: parent.width; text: root.micLabel(modelData); color: connected ? root.fg : root.dim; font.pixelSize: Style.font.body }
+                PlainText { width: parent.width; visible: !connected; text: "Not connected"; color: root.dim; font.pixelSize: Style.font.caption }
+              }
+              PlainText {
+                id: micPickCheck
+                anchors.right: parent.right; anchors.rightMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                text: used ? "󰄬" : "󰐕"
+                color: used ? Commons.Color.accent : root.dim
+                font.pixelSize: Style.font.caption
+              }
+            }
+          }
+          PlainText {
+            visible: root.micDevicesOpen
+            width: parent.width
+            wrapMode: Text.WordWrap
+            elide: Text.ElideNone
+            text: root.micChoices.length === 0 ? "Looking for microphones…" : "Ticked microphones are mixed into Mic."
+            color: root.dim; font.pixelSize: Style.font.caption
+          }
+        }
+
         Timer { id: micApply; interval: 40; onTriggered: root.setInputVolume(root.mic) }
 
         SliderRow {
