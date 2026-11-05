@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ebirkhoff.control",
+  "name": "Control",
+  "version": "0.1.0",
+  "author": "ebirkhoff",
+  "license": "MIT",
+  "description": "Control centre: Wi-Fi, Bluetooth, sound, microphone, brightness and quick toggles in one hover panel, with shortcuts to the full panels.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Control",
+    "description": "One icon for Wi-Fi, Bluetooth, sound, brightness and quick toggles",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
