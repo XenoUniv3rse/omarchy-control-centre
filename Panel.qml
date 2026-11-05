@@ -328,9 +328,13 @@ Panel {
 
   function run(argv) { Quickshell.execDetached(argv) }
   // Full panels of the widgets this one stands in for.
-  function openPanel(id) {
+  // Takes one id or a list; opens the first that answers (e.g. Pipeworks'
+  // mixer, else Omarchy's own sound panel). Ids go in as arguments, never
+  // into the script text.
+  function openPanel(ids) {
     root.close()
-    run(["omarchy-shell", "-q", "shell", "summon", id, "{}"])
+    var list = ids instanceof Array ? ids : [ids]
+    run(["bash", "-c", "for id in \"$@\"; do [ \"$(omarchy-shell shell summon \"$id\" '{}' 2>/dev/null)\" = ok ] && exit 0; done; exit 1", "open-panel"].concat(list))
   }
 
   implicitWidth: button.implicitWidth
@@ -474,11 +478,11 @@ Panel {
           muted: root.volumeMuted
           value: root.volume
           maximum: 100
-          actionIcon: "󰘮"; actionTip: "Pipeworks mixer"
+          actionIcon: "󰘮"; actionTip: root.pwRunning ? "Pipeworks mixer" : "Sound settings"
           sliderRef: volumeSlider
           locked: root.pwOut && root.pwVolumeLocked
           onIconClicked: { root.volumeMuted = !root.volumeMuted; root.toggleOutputMute() }
-          onAction: root.openPanel("pipeworks.mixer")
+          onAction: root.openPanel(["pipeworks.mixer", "omarchy.audio"])
           PanelSlider {
             id: volumeSlider
             bar: root.bar
@@ -692,7 +696,7 @@ Panel {
           maximum: 100
           actionIcon: "󰍺"; actionTip: "Displays"
           sliderRef: brightnessSlider
-          onAction: root.openPanel("crmne.hyprmoncfg")
+          onAction: root.openPanel(["crmne.hyprmoncfg", "omarchy.monitor"])
           PanelSlider {
             id: brightnessSlider
             bar: root.bar
